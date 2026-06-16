@@ -1,0 +1,56 @@
+services:
+  postgres_master:
+    image: postgres:16-bookworm
+    container_name: operation_flow_postgres_master
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${DB_PORT}:5432"
+    command: ["postgres", "-c", "wal_level=logical"]
+    volumes:
+      - ./db/init-scripts:/docker-entrypoint-initdb.d
+      - operation_flow_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres_replica:
+    image: postgres:16-bookworm
+    container_name: operation_flow_postgres_replica
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./db/init-replica:/docker-entrypoint-initdb.d
+      - operation_flow_replica_data:/var/lib/postgresql/data
+    depends_on:
+      postgres_master:
+        condition: service_healthy
+
+  timetable_worker:
+    image: cybertecpostgresql/pg_timetable:6.3.0
+    container_name: operation_flow_timetable
+    restart: always
+    platform: linux/amd64
+    volumes:
+      - ./db/timetable-jobs.sql:/timetable-jobs.sql:ro
+    command:
+      - "--clientname=operation_flow"
+      - "--connstr=postgresql://${DB_USER}:${DB_PASSWORD}@postgres_master:5432/${DB_NAME}?sslmode=disable"
+      - "--file=/timetable-jobs.sql"
+    depends_on:
+      postgres_master:
+        condition: service_healthy
+
+volumes:
+  operation_flow_db_data:
+  operation_flow_replica_data:
